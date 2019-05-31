@@ -2,7 +2,6 @@ package com.wavesplatform.lang
 
 import cats.data.EitherT
 import cats.kernel.Monoid
-import com.wavesplatform.common.utils.Base58
 import com.wavesplatform.lang.Common._
 import com.wavesplatform.lang.directives.values._
 import com.wavesplatform.lang.Testing._
@@ -819,5 +818,19 @@ class IntegrationTest extends PropSpec with PropertyChecks with ScriptGen with M
 
     eval(script("valueWithErrorMessage", error = false))   shouldBe Right(CONST_LONG(1))
     eval(script("valueWithErrorMessage", error = true))    shouldBe Left(message)
+  }
+
+  property("list type inferrer 2") {
+    val script =
+      s"""
+         | let l = if (true)
+         |         then if false
+         |              then nil
+         |              else nil
+         |         else "str"
+         | size(l) == 0
+      """.stripMargin
+
+    eval[EVALUATED](script, None) should produce("Can't find a function overload 'size'")
   }
 }
