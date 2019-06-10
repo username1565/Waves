@@ -3,12 +3,12 @@ package com.wavesplatform.lang
 import cats.data.EitherT
 import cats.kernel.Monoid
 import com.wavesplatform.lang.Common._
-import com.wavesplatform.lang.directives.values._
 import com.wavesplatform.lang.Testing._
+import com.wavesplatform.lang.directives.values._
 import com.wavesplatform.lang.v1.CTX
 import com.wavesplatform.lang.v1.compiler.Terms._
 import com.wavesplatform.lang.v1.compiler.Types.{BYTESTR, FINAL, LONG, STRING}
-import com.wavesplatform.lang.v1.compiler.{CompilerContext, ExpressionCompiler, Terms}
+import com.wavesplatform.lang.v1.compiler.{ExpressionCompiler, Terms}
 import com.wavesplatform.lang.v1.evaluator.EvaluatorV1
 import com.wavesplatform.lang.v1.evaluator.ctx._
 import com.wavesplatform.lang.v1.evaluator.ctx.impl.{PureContext, _}
@@ -119,7 +119,10 @@ class IntegrationTest extends PropSpec with PropertyChecks with ScriptGen with M
     eval[EVALUATED](sampleScript, Some(pointBInstance)) shouldBe evaluated(1)
   }
 
-  private def eval[T <: EVALUATED](code: String, pointInstance: Option[CaseObj] = None, pointType: FINAL = AorBorC, ctxt: CTX = CTX.empty): Either[String, T] = {
+  private def eval[T <: EVALUATED](code: String,
+                                   pointInstance: Option[CaseObj] = None,
+                                   pointType: FINAL = AorBorC,
+                                   ctxt: CTX = CTX.empty): Either[String, T] = {
     val untyped                                                = Parser.parseExpr(code).get.value
     val lazyVal                                                = LazyVal(EitherT.pure(pointInstance.orNull))
     val stringToTuple: Map[String, ((FINAL, String), LazyVal)] = Map(("p", ((pointType, "Test variable"), lazyVal)))
@@ -383,6 +386,14 @@ class IntegrationTest extends PropSpec with PropertyChecks with ScriptGen with M
     eval[EVALUATED](src) shouldBe evaluated(List(1, 2, 3, 4, 5))
   }
 
+  property("LIST access IndexOutOfBounds") {
+    val src =
+      """
+        |[1].getElement(1)
+      """.stripMargin
+    eval[EVALUATED](src) should produce("OutOfBounds")
+  }
+
   property("list constructor for different data entries") {
     val src =
       """
@@ -471,9 +482,10 @@ class IntegrationTest extends PropSpec with PropertyChecks with ScriptGen with M
     for (i <- 65528 to 65535) array(i) = 1
     val src =
       s""" arr.toInt(65528) """
-    eval[EVALUATED](src, ctxt = CTX(Seq(),
-      Map("arr" -> ((BYTESTR -> "max sized ByteVector") -> LazyVal(EitherT.pure(CONST_BYTESTR(array))))), Array())
-    ) shouldBe Right(CONST_LONG(0x0101010101010101L))
+    eval[EVALUATED](
+      src,
+      ctxt = CTX(Seq(), Map("arr" -> ((BYTESTR -> "max sized ByteVector") -> LazyVal(EitherT.pure(CONST_BYTESTR(array))))), Array())) shouldBe Right(
+      CONST_LONG(0x0101010101010101L))
   }
 
   property("toInt by offset (partial)") {
@@ -558,9 +570,8 @@ class IntegrationTest extends PropSpec with PropertyChecks with ScriptGen with M
     val str = "a" * 32766 + "z"
     val src =
       """ str.indexOf("z", 32766) """
-    eval[EVALUATED](src, ctxt = CTX(Seq(),
-      Map("str" -> ((STRING -> "max sized String") -> LazyVal(EitherT.pure(CONST_STRING(str))))), Array())
-    ) shouldBe Right(CONST_LONG(32766L))
+    eval[EVALUATED](src, ctxt = CTX(Seq(), Map("str" -> ((STRING -> "max sized String") -> LazyVal(EitherT.pure(CONST_STRING(str))))), Array())) shouldBe Right(
+      CONST_LONG(32766L))
   }
 
   property("indexOf (not present)") {
@@ -609,6 +620,82 @@ class IntegrationTest extends PropSpec with PropertyChecks with ScriptGen with M
     val src =
       """ "".indexOf("") """
     eval[EVALUATED](src) shouldBe Right(CONST_LONG(0))
+  }
+
+  property("lastIndexOf") {
+    val src =
+      """ "qweqwe".lastIndexOf("we") """
+    eval(src) shouldBe Right(CONST_LONG(4))
+  }
+
+  property("lastIndexOf with zero offset") {
+    val src =
+      """ "qweqwe".lastIndexOf("qw", 0) """
+    eval(src) shouldBe Right(CONST_LONG(0))
+  }
+
+  property("lastIndexOf with start offset") {
+    val src =
+      """ "qweqwe".lastIndexOf("we", 4) """
+    eval(src) shouldBe Right(CONST_LONG(4L))
+  }
+
+  property("lastIndexOf from end of max sized string") {
+    val str = "a" * 32766 + "z"
+    val src =
+      """ str.lastIndexOf("z", 32766) """
+    eval(src, ctxt = CTX(Seq(),
+      Map("str" -> ((STRING -> "max sized String") -> LazyVal(EitherT.pure(CONST_STRING(str))))), Array())
+    ) shouldBe Right(CONST_LONG(32766L))
+  }
+
+  property("lastIndexOf (not present)") {
+    val src =
+      """ "qweqwe".lastIndexOf("ww") """
+    eval(src) shouldBe Right(unit)
+  }
+
+  property("lastIndexOf from empty string") {
+    val src =
+      """ "".lastIndexOf("!") """
+    eval(src) shouldBe Right(unit)
+  }
+
+  property("lastIndexOf from empty string with offset") {
+    val src =
+      """ "".lastIndexOf("!", 1) """
+    eval(src) shouldBe Right(unit)
+  }
+
+  property("lastIndexOf from string with Long.MaxValue offset") {
+    val src =
+      s""" "abc".lastIndexOf("c", ${Long.MaxValue}) """
+    eval(src) shouldBe Right(unit)
+  }
+
+  property("lastIndexOf from string with negative offset") {
+    val src =
+      """ "abc".lastIndexOf("a", -1) """
+    eval(src) shouldBe Right(unit)
+  }
+
+  property("lastIndexOf from string with negative Long.MinValue offset") {
+    val src =
+      s""" "abc".lastIndexOf("a", ${Long.MinValue}) """
+    eval(src) shouldBe Right(unit)
+  }
+
+  property("lastIndexOf empty string from non-empty string") {
+    val str = "abcde"
+    val src =
+      s""" "$str".lastIndexOf("") """
+    eval(src) shouldBe Right(CONST_LONG(str.length))
+  }
+
+  property("lastIndexOf empty string from empty string") {
+    val src =
+      """ "".lastIndexOf("") """
+    eval(src) shouldBe Right(CONST_LONG(0))
   }
 
   property("split") {
@@ -721,7 +808,7 @@ class IntegrationTest extends PropSpec with PropertyChecks with ScriptGen with M
          | }
          |
       """.stripMargin
-    eval[EVALUATED](sampleScript, None) should produce("all possible types are List(Int, String)")
+    eval(sampleScript) should produce("Undefined type: `UndefinedType` of variable `a`, expected: Int, String")
   }
 
   property("big let assignment chain") {
@@ -804,7 +891,6 @@ class IntegrationTest extends PropSpec with PropertyChecks with ScriptGen with M
     eval[EVALUATED](script, None) shouldBe Right(CONST_BOOLEAN(true))
   }
 
-
   property("matching parameterized types") {
     val script =
       s"""
@@ -824,19 +910,16 @@ class IntegrationTest extends PropSpec with PropertyChecks with ScriptGen with M
 
   property("extract functions with message") {
     val message = "Custom error message"
-    def script(func: String, error: Boolean): String =
+    def script(error: Boolean): String =
       s"""
          |
          | let a = if ($error) then unit else 1
-         | $func(a, "$message")
+         | valueOrErrorMessage(a, "$message")
          |
        """.stripMargin
 
-    eval(script("extractWithErrorMessage", error = false)) shouldBe Right(CONST_LONG(1))
-    eval(script("extractWithErrorMessage", error = true))  shouldBe Left(message)
-
-    eval(script("valueWithErrorMessage", error = false))   shouldBe Right(CONST_LONG(1))
-    eval(script("valueWithErrorMessage", error = true))    shouldBe Left(message)
+    eval(script(error = false)) shouldBe Right(CONST_LONG(1))
+    eval(script(error = true))  shouldBe Left(message)
   }
 
   property("list type inferrer 2") {
